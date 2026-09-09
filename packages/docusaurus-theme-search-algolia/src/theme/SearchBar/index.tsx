@@ -12,8 +12,9 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import {createPortal} from 'react-dom';
+import {createPortal, flushSync} from 'react-dom';
 import {DocSearchButton} from '@docsearch/react/button';
+import {SidepanelButton} from '@docsearch/react/sidepanel';
 import {useDocSearchKeyboardEvents} from '@docsearch/react/useDocSearchKeyboardEvents';
 import Head from '@docusaurus/Head';
 import Link from '@docusaurus/Link';
@@ -25,6 +26,8 @@ import {
   useAlgoliaAskAi,
   mergeFacetFilters,
   useSearchLinkCreator,
+  useNormalizeMode,
+  useAlgoliaSidepanelKeyboardEvents,
 } from '@docusaurus/theme-search-algolia/client';
 import Translate from '@docusaurus/Translate';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
@@ -37,7 +40,13 @@ import {
   type DocSearchTransformClient,
   type DocSearchHit,
   type DocSearchAskAi,
+  type DocSearchAIProps,
 } from '@docsearch/react';
+import {
+  type Sidepanel as SidepanelType,
+  type SidepanelButtonProps,
+  type SidepanelProps,
+} from '@docsearch/react/sidepanel';
 import translations from '@theme/SearchTranslations';
 
 import type {AutocompleteState} from '@algolia/autocomplete-core';
@@ -51,6 +60,11 @@ type DocSearchProps = Omit<
   externalUrlRegex?: string;
   searchPagePath: boolean | string;
   askAi?: DocSearchAskAi;
+  mode?: 'modal' | 'sidepanel' | 'hybrid';
+  sidepanel?: {
+    button?: SidepanelButtonProps;
+    panel?: SidepanelProps;
+  };
 };
 
 type ModalKind = 'askai' | 'search';
@@ -59,6 +73,8 @@ type ModalComponentType =
   | typeof DocSearchAskAiModalType;
 
 const loadedModules: Partial<Record<ModalKind, ModalComponentType>> = {};
+
+let Sidepanel: typeof SidepanelType | null = null;
 
 function importDocSearchModalIfNeeded(kind: ModalKind) {
   if (loadedModules[kind]) {
@@ -77,6 +93,21 @@ function importDocSearchModalIfNeeded(kind: ModalKind) {
   ]).then(([Modal]) => {
     loadedModules[kind] = Modal;
   });
+}
+
+async function importSidepanelIfNeeded() {
+  if (Sidepanel) {
+    return;
+  }
+
+  const [{Sidepanel: SidepanelComp}] = await Promise.all([
+    import('@docsearch/react/sidepanel'),
+    import('@docsearch/react/style'),
+    import('@docsearch/react/style/sidepanel'),
+  ]);
+
+  await import('./styles.css');
+  Sidepanel = SidepanelComp;
 }
 
 function useNavigator({
@@ -205,18 +236,34 @@ function useNormalizeIndices({
   return indices;
 }
 
-function DocSearch({externalUrlRegex, ...props}: DocSearchProps) {
+type InitialMessage = {
+  query: string;
+  messageId?: string;
+  suggestedQuestionId?: string;
+};
+
+function DocSearch({
+  externalUrlRegex,
+  mode = 'modal',
+  ...props
+}: DocSearchProps) {
   const navigator = useNavigator({externalUrlRegex});
   const indices = useNormalizeIndices({...props});
   const transformItems = useTransformItems(props);
   const transformSearchClient = useTransformSearchClient();
+  const {isModal, isSidepanel} = useNormalizeMode({mode, askAi: props.askAi});
 
   const searchContainer = useRef<HTMLDivElement | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sidepanelButtonRef = useRef<HTMLButtonElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [initialQuery, setInitialQuery] = useState<string | undefined>(
     undefined,
   );
+  const [isSidepanelOpen, setIsSidepanelOpen] = useState(false);
+  const [initialMessage, setInitialMessage] = useState<
+    InitialMessage | undefined
+  >(undefined);
 
   const {
     isAskAiActive,
@@ -224,7 +271,8 @@ function DocSearch({externalUrlRegex, ...props}: DocSearchProps) {
     onAskAiToggle,
     extraAskAiProps,
     canHandleAskAi,
-  } = useAlgoliaAskAi(props);
+    askAi,
+  } = useAlgoliaAskAi({...props});
 
   const prepareSearchContainer = useCallback(() => {
     if (!searchContainer.current) {
@@ -237,13 +285,26 @@ function DocSearch({externalUrlRegex, ...props}: DocSearchProps) {
   const modalKind: ModalKind = canHandleAskAi ? 'askai' : 'search';
 
   const loadModal = useCallback(() => {
+    if (!isModal) {
+      return Promise.resolve();
+    }
+
     return importDocSearchModalIfNeeded(modalKind);
-  }, [modalKind]);
+  }, [modalKind, isModal]);
 
   const openModal = useCallback(() => {
+    if (!isModal) {
+      return;
+    }
+
     prepareSearchContainer();
-    loadModal().then(() => setIsOpen(true));
-  }, [prepareSearchContainer, loadModal]);
+    loadModal().then(() => {
+      flushSync(() => {
+        setIsSidepanelOpen(false);
+        setIsOpen(true);
+      });
+    });
+  }, [prepareSearchContainer, loadModal, isModal]);
 
   const closeModal = useCallback(() => {
     setIsOpen(false);
@@ -251,6 +312,49 @@ function DocSearch({externalUrlRegex, ...props}: DocSearchProps) {
     setInitialQuery(undefined);
     onAskAiToggle(false);
   }, [onAskAiToggle]);
+
+  const loadSidepanel = () => {
+    return importSidepanelIfNeeded();
+  };
+
+  const openSidepanel = useCallback(() => {
+    if (!isSidepanel) {
+      return;
+    }
+
+    loadSidepanel().then(() => {
+      flushSync(() => {
+        setIsOpen(false);
+        setIsSidepanelOpen(true);
+      });
+    });
+  }, [isSidepanel]);
+
+  const closeSidepanel = useCallback(() => {
+    setIsSidepanelOpen(false);
+    sidepanelButtonRef.current?.focus();
+    onAskAiToggle(false);
+  }, [onAskAiToggle]);
+
+  const interceptAskAiEvent: DocSearchAIProps['interceptAskAiEvent'] =
+    useCallback(
+      (message) => {
+        if (!isSidepanel) {
+          return false;
+        }
+
+        loadSidepanel().then(() => {
+          flushSync(() => {
+            setInitialMessage(message);
+            setIsOpen(false);
+            setIsSidepanelOpen(true);
+          });
+        });
+
+        return true;
+      },
+      [isSidepanel],
+    );
 
   const handleInput = useCallback(
     (event: KeyboardEvent) => {
@@ -276,9 +380,35 @@ function DocSearch({externalUrlRegex, ...props}: DocSearchProps) {
     searchButtonRef,
     isAskAiActive: isAskAiActive ?? false,
     onAskAiToggle: onAskAiToggle ?? (() => {}),
+    keyboardShortcuts: {
+      '/': isModal,
+      'Ctrl/Cmd+K': isModal,
+    },
+  });
+
+  useAlgoliaSidepanelKeyboardEvents({
+    onClose: closeSidepanel,
+    onOpen: openSidepanel,
+    isOpen: isSidepanelOpen,
+    isEnabled: isSidepanel,
   });
 
   const DocSearchModal = loadedModules[modalKind];
+
+  const isFloatingSidepanelButton =
+    (props.sidepanel?.button?.variant ?? 'floating') === 'floating';
+
+  const sidepanelButton = (
+    <SidepanelButton
+      ref={sidepanelButtonRef}
+      onTouchStart={loadSidepanel}
+      onFocus={loadSidepanel}
+      onMouseOver={loadSidepanel}
+      onClick={openSidepanel}
+      {...props.sidepanel?.button}
+      {...(isFloatingSidepanelButton ? {tabIndex: 0} : {})}
+    />
+  );
 
   return (
     <>
@@ -293,16 +423,19 @@ function DocSearch({externalUrlRegex, ...props}: DocSearchProps) {
         />
       </Head>
 
-      <DocSearchButton
-        onTouchStart={loadModal}
-        onFocus={loadModal}
-        onMouseOver={loadModal}
-        onClick={openModal}
-        ref={searchButtonRef}
-        translations={props.translations?.button ?? translations.button}
-      />
+      {isModal && (
+        <DocSearchButton
+          onTouchStart={loadModal}
+          onFocus={loadModal}
+          onMouseOver={loadModal}
+          onClick={openModal}
+          ref={searchButtonRef}
+          translations={props.translations?.button ?? translations.button}
+        />
+      )}
 
-      {isOpen &&
+      {isModal &&
+        isOpen &&
         DocSearchModal &&
         // TODO fix this
         // eslint-disable-next-line react-hooks/refs
@@ -324,11 +457,40 @@ function DocSearch({externalUrlRegex, ...props}: DocSearchProps) {
             translations={props.translations?.modal ?? translations.modal}
             indices={indices}
             {...extraAskAiProps}
+            interceptAskAiEvent={interceptAskAiEvent}
           />,
 
           // TODO fix this
           // eslint-disable-next-line react-hooks/refs
           searchContainer.current,
+        )}
+
+      {isSidepanel && askAi && (
+        <>
+          {isFloatingSidepanelButton
+            ? createPortal(sidepanelButton, document.body)
+            : sidepanelButton}
+        </>
+      )}
+
+      {isSidepanel &&
+        askAi &&
+        Sidepanel &&
+        createPortal(
+          <Sidepanel
+            {...askAi}
+            apiKey={askAi.apiKey ?? props.apiKey}
+            appId={askAi.appId ?? props.appId}
+            isOpen={isSidepanelOpen}
+            onOpen={openSidepanel}
+            onClose={closeSidepanel}
+            initialMessage={initialMessage}
+            keyboardShortcuts={{
+              'Ctrl/Cmd+I': false,
+            }}
+            {...props.sidepanel?.panel}
+          />,
+          document.body,
         )}
     </>
   );

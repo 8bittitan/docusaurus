@@ -13,6 +13,10 @@ declare module '@docusaurus/theme-search-algolia' {
     DocSearchAskAi,
     AskAiSearchParameters,
   } from '@docsearch/react';
+  import type {
+    SidepanelProps,
+    SidepanelButtonProps,
+  } from '@docsearch/react/sidepanel';
 
   // `tools` won't currently work as they require functions
   // NOTE: Agent Studio doesn't support `facetFilters` for search parameters,
@@ -40,6 +44,20 @@ declare module '@docusaurus/theme-search-algolia' {
   > & {
     // Docusaurus normalizes the AskAI config to an object
     askAi?: AskAiConfig;
+    mode?: 'modal' | 'sidepanel' | 'hybrid';
+    sidepanel?: {
+      button?: Pick<SidepanelButtonProps, 'variant' | 'translations'>;
+      panel?: Pick<
+        SidepanelProps,
+        | 'variant'
+        | 'translations'
+        | 'indices'
+        | 'memory'
+        | 'side'
+        | 'width'
+        | 'expandedWidth'
+      >;
+    };
   };
 
   export type ThemeConfigAlgolia = DocusaurusDocSearchProps & {

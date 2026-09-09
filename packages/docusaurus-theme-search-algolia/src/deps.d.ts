@@ -6,6 +6,7 @@
  */
 
 declare module '@docsearch/react/style';
+declare module '@docsearch/react/style/sidepanel';
 
 // TODO incompatible declaration file
 declare module 'eta' {

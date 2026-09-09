@@ -14,3 +14,5 @@ export {useSearchResultUrlProcessor} from './useSearchResultUrlProcessor';
 export {useAlgoliaAskAi} from './useAlgoliaAskAi';
 export {useSearchQueryString, useSearchLinkCreator} from './searchPage';
 export {mergeFacetFilters} from './utils';
+export {useNormalizeMode} from './useNormalizeMode';
+export {useAlgoliaSidepanelKeyboardEvents} from './useAlgoliaSidepanelKeyboardEvents';

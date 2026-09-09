@@ -10,6 +10,10 @@
   --docsearch-text-color: var(--ifm-font-color-base);
 }
 
+.DocSearch p {
+  margin: 0;
+}
+
 .DocSearch-Button {
   margin: 0;
   transition: all var(--ifm-transition-fast)
@@ -26,4 +30,28 @@
 
 .DocSearch-Hit-AskAIButton {
   height: var(--docsearch-hit-height);
+}
+
+@media (width >= 769px) and (prefers-reduced-motion: no-preference) {
+  @starting-style {
+    .DocSearch-Sidepanel-Container.is-open {
+      opacity: 0;
+    }
+
+    .DocSearch-Sidepanel-Container.floating.side-right.is-open {
+      transform: translateX(calc(100% + 2rem));
+    }
+
+    .DocSearch-Sidepanel-Container.floating.side-left.is-open {
+      transform: translateX(calc(-100% - 2rem));
+    }
+
+    .DocSearch-Sidepanel-Container.inline.side-right.is-open {
+      transform: translateX(100%);
+    }
+
+    .DocSearch-Sidepanel-Container.inline.side-left.is-open {
+      transform: translateX(-100%);
+    }
+  }
 }

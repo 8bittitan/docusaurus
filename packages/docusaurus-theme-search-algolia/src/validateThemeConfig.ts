@@ -17,11 +17,37 @@ export const DEFAULT_CONFIG = {
   // see also https://github.com/facebook/docusaurus/issues/5880
   contextualSearch: true,
   searchPagePath: 'search',
+  mode: 'modal',
 } satisfies Partial<ThemeConfigAlgolia>;
 
 const FacetFiltersSchema = Joi.array().items(
   Joi.alternatives().try(Joi.string(), Joi.array().items(Joi.string())),
 );
+
+const SidepanelSchema = Joi.object({
+  button: Joi.object({
+    variant: Joi.string()
+      .valid('inline', 'floating')
+      .optional()
+      .default('floating'),
+  })
+    .optional()
+    .unknown(),
+  panel: Joi.object({
+    variant: Joi.string()
+      .valid('inline', 'floating')
+      .optional()
+      .default('floating'),
+    side: Joi.string().valid('left', 'right').optional().default('right'),
+    indices: Joi.array().items(Joi.string()).optional(),
+    width: Joi.alternatives().try(Joi.string(), Joi.number()).optional(),
+    expandedWidth: Joi.alternatives()
+      .try(Joi.string(), Joi.number())
+      .optional(),
+  })
+    .optional()
+    .unknown(),
+});
 
 export const Schema = Joi.object<ThemeConfig>({
   algolia: Joi.object<ThemeConfigAlgolia>({
@@ -146,11 +172,22 @@ export const Schema = Joi.object<ThemeConfig>({
           return askAiInput;
         },
       )
-      .optional()
+      .when('mode', {
+        is: Joi.valid('sidepanel', 'hybrid').required(),
+        then: Joi.required(),
+        otherwise: Joi.optional(),
+      })
       .messages({
+        'any.required':
+          '"algolia.askAi" is required when "algolia.mode" is "sidepanel" or "hybrid"',
         'alternatives.types':
           'askAi must be either a string (agentId) or an object with apiKey, appId, and agentId',
       }),
+    mode: Joi.string()
+      .valid('modal', 'sidepanel', 'hybrid')
+      .optional()
+      .default(DEFAULT_CONFIG.mode),
+    sidepanel: SidepanelSchema.optional(),
   })
     .label('themeConfig.algolia')
     .required()
